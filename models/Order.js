@@ -30,6 +30,12 @@ const OrderSchema = new mongoose.Schema({
     phone: String,
     email: String,
   },
+   tax_details: {
+    base_total: Number,
+    cgst_total: Number,
+    sgst_total: Number,
+  },
+  terms_and_conditions: String,
 });
 
 module.exports = mongoose.model("Order", OrderSchema);

@@ -1,7 +1,7 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { createShipment } = require('../Controllers/dhlController');
+const { createDHLShipment } = require("../Controllers/dhlController");
 
-router.post('/create-shipment', createShipment);
+router.post("/create-shipment", createDHLShipment);
 
 module.exports = router;
