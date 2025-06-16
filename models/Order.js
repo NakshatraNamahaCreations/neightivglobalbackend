@@ -7,14 +7,29 @@ const OrderSchema = new mongoose.Schema({
     {
       productId: String,
       name: String,
-      price: Number,
+      price: Number, // Price in INR
       quantity: Number,
     },
   ],
-  total: { type: Number, required: true },
-  currency: { type: String, default: "USD" },
+  total: { type: Number, required: true }, // Total in INR
+  currency: { type: String, default: "INR" }, // Changed to INR for consistency
   status: { type: String, default: "completed" },
   createdAt: { type: Date, default: Date.now },
+  shiprocketOrderId: { type: String }, // Shiprocket order ID
+  shipmentId: { type: String }, // Shiprocket shipment ID
+  awbCode: { type: String }, // Air Waybill code
+  courierName: { type: String }, // Courier (e.g., Delhivery, FedEx)
+  shippingStatus: { type: String, default: "pending" }, // e.g., pending, shipped, delivered
+  shippingAddress: {
+    name: String,
+    address: String,
+    city: String,
+    state: String,
+    country: String,
+    pincode: String,
+    phone: String,
+    email: String,
+  },
 });
 
 module.exports = mongoose.model("Order", OrderSchema);

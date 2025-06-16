@@ -61,7 +61,6 @@ router.post("/create-order", async (req, res) => {
       return res.status(401).json({ message: "Access token is required." });
     }
 
-    // Calculate item_total from cartItems
     const itemTotal = cartItems.reduce((total, item) => {
       const price = parseFloat(item.price);
       const quantity = parseInt(item.quantity);
@@ -71,7 +70,6 @@ router.post("/create-order", async (req, res) => {
       return total + price * quantity;
     }, 0);
 
-    // Validate item_total matches amount
     if (Math.abs(itemTotal - numericAmount) > 0.01) {
       return res.status(400).json({ message: "Item total does not match order amount." });
     }
@@ -146,6 +144,7 @@ router.get("/capture-order", async (req, res) => {
   }
 
   try {
+    // Capture PayPal order
     const tokenResponse = await fetch("https://api.paypal.com/v1/oauth2/token", {
       method: "POST",
       headers: {
@@ -169,23 +168,114 @@ router.get("/capture-order", async (req, res) => {
       throw new Error(captureResult.details?.[0]?.description || "Failed to capture order");
     }
 
+    // Default shipping details if PayPal doesn't provide them
+    const shippingDetails = {
+      name: captureResult.purchase_units[0]?.shipping?.name?.full_name || "Customer",
+      address: captureResult.purchase_units[0]?.shipping?.address?.address_line_1 || "123 Main Street",
+      city: captureResult.purchase_units[0]?.shipping?.address?.admin_area_2 || "Bengaluru",
+      state: captureResult.purchase_units[0]?.shipping?.address?.admin_area_1 || "Karnataka",
+      country: captureResult.purchase_units[0]?.shipping?.address?.country_code || "IN",
+      pincode: captureResult.purchase_units[0]?.shipping?.address?.postal_code || "560034",
+      phone: captureResult.payer?.phone?.phone_number?.national_number || "+919845588222",
+      email: captureResult.payer?.email_address || "customer@example.com",
+    };
+
+    // Save PayPal order to MongoDB
     const order = new Order({
       paypalOrderId: captureResult.id,
-      userId: null, // Set to req.user?._id if authentication is implemented
+      userId: null,
       items: captureResult.purchase_units[0].items
         ? captureResult.purchase_units[0].items.map((item) => ({
             productId: item.sku || "N/A",
             name: item.name,
-            price: parseFloat(item.unit_amount.value),
+            price: parseFloat(item.unit_amount.value) / 0.012,
             quantity: parseInt(item.quantity),
           }))
         : [],
-      total: parseFloat(captureResult.purchase_units[0].amount.value),
-      currency: captureResult.purchase_units[0].amount.currency_code || "USD",
+      total: parseFloat(captureResult.purchase_units[0].amount.value) / 0.012,
+      currency: "INR",
+      shippingAddress: shippingDetails,
     });
     await order.save();
 
+    // Create Shiprocket order
+    const shiprocketHeaders = new Headers();
+    shiprocketHeaders.append("Content-Type", "application/json");
+
+    const shiprocketLoginRaw = JSON.stringify({
+      email: process.env.SHIPROCKET_EMAIL,
+      password: process.env.SHIPROCKET_PASSWORD,
+    });
+
+    const shiprocketLoginResponse = await fetch(`${process.env.SHIPROCKET_API_URL}/auth/login`, {
+      method: "POST",
+      headers: shiprocketHeaders,
+      body: shiprocketLoginRaw,
+    });
+    const shiprocketLoginResult = await shiprocketLoginResponse.json();
+
+    if (!shiprocketLoginResponse.ok) {
+      throw new Error(shiprocketLoginResult.message || "Failed to authenticate with Shiprocket");
+    }
+
+    shiprocketHeaders.set("Authorization", `Bearer ${shiprocketLoginResult.token}`);
+
+    const shiprocketOrderRaw = JSON.stringify({
+      order_id: captureResult.id,
+      order_date: new Date().toISOString().split("T")[0],
+      pickup_location: "Primary",
+      billing_customer_name: shippingDetails.name.split(" ")[0] || shippingDetails.name,
+      billing_last_name: shippingDetails.name.split(" ")[1] || "",
+      billing_address: shippingDetails.address,
+      billing_city: shippingDetails.city,
+      billing_pincode: shippingDetails.pincode,
+      billing_state: shippingDetails.state,
+      billing_country: shippingDetails.country === "IN" ? "India" : shippingDetails.country,
+      billing_email: shippingDetails.email,
+      billing_phone: shippingDetails.phone,
+      shipping_is_billing: true,
+      order_items: captureResult.purchase_units[0].items
+        ? captureResult.purchase_units[0].items.map((item) => ({
+            name: item.name,
+            sku: item.sku || `SKU_${item.name}`,
+            units: parseInt(item.quantity),
+            selling_price: parseFloat(item.unit_amount.value) / 0.012,
+            hsn: "6109",
+          }))
+        : [],
+      payment_method: "Prepaid",
+      sub_total: parseFloat(captureResult.purchase_units[0].amount.value) / 0.012,
+      length: 10,
+      breadth: 10,
+      height: 1,
+      weight: 0.5,
+    });
+
+    const shiprocketOrderResponse = await fetch(`${process.env.SHIPROCKET_API_URL}/orders/create/adhoc`, {
+      method: "POST",
+      headers: shiprocketHeaders,
+      body: shiprocketOrderRaw,
+    });
+    const shiprocketOrderResult = await shiprocketOrderResponse.json();
+
+    if (!shiprocketOrderResponse.ok) {
+      throw new Error(shiprocketOrderResult.message || "Failed to create Shiprocket order");
+    }
+
+    // Update MongoDB with Shiprocket details
+    await Order.findOneAndUpdate(
+      { paypalOrderId: captureResult.id },
+      {
+        shiprocketOrderId: shiprocketOrderResult.order_id,
+        shipmentId: shiprocketOrderResult.shipment_id,
+        shippingStatus: "created",
+        shippingAddress: shippingDetails,
+      },
+      { new: true }
+    );
+
     console.log("✅ PayPal Order Captured:", captureResult.id);
+    console.log("✅ Shiprocket Order Created:", shiprocketOrderResult.order_id);
     res.redirect("https://neightivglobal.com/paypal-success?status=success");
   } catch (error) {
     console.error("❌ PayPal Capture Error:", error.message);

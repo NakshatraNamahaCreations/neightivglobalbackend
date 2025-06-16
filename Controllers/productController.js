@@ -40,7 +40,7 @@ const productController = {
       console.log("Incoming body:", req.body);
       console.log("Uploaded files:", req.files);
 
-      const { name, description, details, amount, dimension } = req.body;
+      const { name, description, details, amount, dimension, sku } = req.body;
 
       if (!name || !description || !amount) {
         return res.status(400).json({ error: "Name, description, and amount are required." });
@@ -58,6 +58,7 @@ const productController = {
         details,
         amount: Number(amount),
         dimension,
+        sku,
         images: imagePaths,
       });
 
@@ -93,7 +94,7 @@ const productController = {
 
   updateProduct: async (req, res) => {
     try {
-      const { name, description, details, amount, dimension, existingImages } = req.body;
+      const { name, description, details, amount, dimension, existingImages, sku } = req.body;
       const product = await Product.findById(req.params.id);
 
       if (!product) {
@@ -105,6 +106,8 @@ const productController = {
       if (details) product.details = details;
       if (amount) product.amount = Number(amount);
       if (dimension) product.dimension = dimension;
+      if (sku) product.sku = sku;
+
 
       // Parse existing images (if sent)
       let currentImages = [];

@@ -5,7 +5,8 @@ const productSchema = new mongoose.Schema({
   description: { type: String, required: true },
   details: { type: String },
   amount: { type: Number, required: true },
-  dimension: { type: String }, // e.g., "10x20x30 cm"
+  dimension: { type: String },
+  sku:{type:String},
   images: [{ type: String }],
 });
 
