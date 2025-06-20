@@ -8,7 +8,9 @@ const customerRoutes = require("./routes/customerRoutes")
 const adminRoutes = require("./routes/adminRoutes");
 const paypalRoutes = require("./routes/paypalRoutes");
 const shiprocketRoutes = require("./routes/shiprocketRoutes");
-const dhlRoutes = require('./routes/dhlRoutes');
+// const dhlRoutes = require('./routes/dhlRoutes');
+const dhlRoutes = require('./routes/dhlShipment');
+const phonepeRoutes = require('./routes/phonepePayment');
 
 dotenv.config();
 const app = express();
@@ -29,8 +31,8 @@ app.options("*", (req, res) => {
   res.sendStatus(200);
 });
 
-app.use(express.json({ limit: "100mb" }));
-app.use(express.urlencoded({ limit: "100mb", extended: true }));
+app.use(express.json({ limit: "200mb" }));
+app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 const connectDB = async () => {
   try {
@@ -67,7 +69,11 @@ app.use("/api/customers", customerRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/paypal", paypalRoutes);
 app.use("/api/shiprocket", shiprocketRoutes);
+// app.use('/api/dhl', dhlRoutes);
 app.use('/api/dhl', dhlRoutes);
+app.use('/api/phonepe', phonepeRoutes);
+
+
 
 app.use((req, res, next) => {
   res.status(404).json({ error: "Route not found" });

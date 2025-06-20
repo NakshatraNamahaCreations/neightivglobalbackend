@@ -36,6 +36,10 @@ const OrderSchema = new mongoose.Schema({
     sgst_total: Number,
   },
   terms_and_conditions: String,
+   transactionId: { type: String },  // Transaction ID from PhonePe
+  paymentStatus: { type: String, default: "pending" },  // Status of payment (e.g., pending, completed, failed)
+  paymentResponse: { type: Object }, // Store full response from PhonePe API
+  paymentRedirectUrl: { type: String }, // The URL to redirect user for payment
 });
 
 module.exports = mongoose.model("Order", OrderSchema);
