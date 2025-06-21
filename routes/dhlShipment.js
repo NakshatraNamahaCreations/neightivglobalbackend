@@ -13,14 +13,24 @@ const convertAmountToWords = (amount) => {
   // Capitalize the first letter of the whole number
   wholeNumberInWords = wholeNumberInWords.charAt(0).toUpperCase() + wholeNumberInWords.slice(1);
 
+  // Add "Dollars" after the whole number
+  wholeNumberInWords = `${wholeNumberInWords} Dollars`;
+
   // Handle the decimal part (cents)
   const decimalInWords = decimal ? ` and ${numberToWords.toWords(decimal)} Cents` : '';
 
-  // Construct the final string in the desired format
-  return `${wholeNumberInWords}${decimalInWords ? decimalInWords : ''} only`;
+  // Construct the final string with "(USD)" at the end
+  return `${wholeNumberInWords}${decimalInWords} only (USD)`;
 };
 
 
+const getCurrentDate = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-based, so add 1
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 // Function to build the SOAP XML with shipping details
 const buildSOAPXML = (data) => {
@@ -42,26 +52,15 @@ const {
   } = data;
 
 
-
-  //    const totalDeclaredValue = cartItems.reduce((sum, item) => {
-    
-  //   return sum + (item.price * item.quantity);
-  // }, 0);
-
- 
-  // const dutiableValue = declaredValue || totalDeclaredValue.toFixed(2);
-
-  // const taxableValue = dutiableValue; // In this case, the taxable value can be the same as the dutiable value
-
-  //  const shipContents = cartItems.map(item => `${item.name} (x${item.quantity})`).join(', ') || 'General merchandise';
-
-  // Calculate total declared value from cart items
   const totalDeclaredValue = cartItems.reduce((sum, item) => {
     return sum + (item.price * item.quantity);
   }, 0);
 
-  // Hardcode total quantity to 2 for testing
-  const totalQuantity = 1;
+  const totalQuantity = cartItems.reduce((sum, item) => {
+    return sum + (item.quantity || 1);
+  }, 0);
+
+  
 
   // Use declaredValue if provided and valid, otherwise use totalDeclaredValue
   const dutiableValue = (declaredValue && !isNaN(parseFloat(declaredValue)))
@@ -78,6 +77,11 @@ const {
   
 
     const totalAmountInWords = convertAmountToWords(dutiableValue);
+
+
+    const currentDate = getCurrentDate();
+
+    const consigneeCountryName = receiverCountryCode === 'US' ? 'United States' : (receiverCountryCode || 'US');
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/" xmlns:dhl="http://schemas.datacontract.org/2004/07/DHLWCFService.App_Code">
@@ -96,7 +100,7 @@ const {
          <tem:ConsigneeDivCode>${receiverStateCode || 'NY'}</tem:ConsigneeDivCode>
          <tem:PostalCode>${receiverPostalCode || '10001'}</tem:PostalCode>
          <tem:ConsigneeCountryCode>${receiverCountryCode || 'US'}</tem:ConsigneeCountryCode>
-         <tem:ConsigneeCountryName>${receiverCountryCode === 'US'}</tem:ConsigneeCountryName>
+               <tem:ConsigneeCountryName>${consigneeCountryName}</tem:ConsigneeCountryName>
          <tem:ConsigneeName>${receiverName || 'Test Name'}</tem:ConsigneeName>
          <tem:ConsigneePh>${receiverPhone || '8888888888'}</tem:ConsigneePh>
          <tem:ConsigneeEmail>asd@gmail.com</tem:ConsigneeEmail>
@@ -133,23 +137,23 @@ const {
          <tem:ShipperRegistrationNumberTypeCode></tem:ShipperRegistrationNumberTypeCode>
          <tem:ShipperRegistrationNumberIssuerCountryCode></tem:ShipperRegistrationNumberIssuerCountryCode>
          <tem:ShipperBusinessPartyTypeCode></tem:ShipperBusinessPartyTypeCode>
-         <tem:BillToCompanyName></tem:BillToCompanyName>
-         <tem:BillToContactName></tem:BillToContactName>
-         <tem:BillToAddressLine1></tem:BillToAddressLine1>
-         <tem:BillToCity></tem:BillToCity>
-         <tem:BillToPostcode></tem:BillToPostcode>
+         <tem:BillToCompanyName>${receiverName || 'Test Name'}</tem:BillToCompanyName>
+         <tem:BillToContactName>${receiverName || 'Test Name'}</tem:BillToContactName>
+         <tem:BillToAddressLine1>${receiverAddress || 'Add2'}</tem:BillToAddressLine1>
+         <tem:BillToCity>${receiverCity}</tem:BillToCity>
+         <tem:BillToPostcode>${receiverPostalCode || '10001'}</tem:BillToPostcode>
          <tem:BillToSuburb></tem:BillToSuburb>
-         <tem:BillToState></tem:BillToState>
-         <tem:BillToCountryName></tem:BillToCountryName>
-         <tem:BillToCountryCode></tem:BillToCountryCode>
-         <tem:BillToPhoneNumber></tem:BillToPhoneNumber>
+         <tem:BillToState>${receiverStateCode || 'NY'}</tem:BillToState>
+         <tem:BillToCountryName>${consigneeCountryName}</tem:BillToCountryName>
+         <tem:BillToCountryCode>${receiverCountryCode || 'US'}</tem:BillToCountryCode>
+         <tem:BillToPhoneNumber>${receiverPhone || '8888888888'}</tem:BillToPhoneNumber>
          <tem:IECNo>DJKPM1845K</tem:IECNo>
          <tem:TermsOfTrade>DAP</tem:TermsOfTrade>
          <tem:Usingecommerce>1</tem:Usingecommerce>
          <tem:IsUnderMEISScheme>0</tem:IsUnderMEISScheme>
          <tem:GSTIN>29AAJCN9859L1ZC</tem:GSTIN>
          <tem:GSTInvNo>6757751226641</tem:GSTInvNo>
-         <tem:GSTInvNoDate>2025-05-23</tem:GSTInvNoDate>
+         <tem:GSTInvNoDate>${currentDate}</tem:GSTInvNoDate>
          <tem:NonGSTInvNo></tem:NonGSTInvNo>
          <tem:NonGSTInvDate></tem:NonGSTInvDate>
          <tem:IsUsingIGST>NO</tem:IsUsingIGST>
@@ -212,7 +216,7 @@ const {
          <tem:isIndemnityClauseRead>YES</tem:isIndemnityClauseRead>
          <tem:ACCOUNT_NO>43576588042</tem:ACCOUNT_NO>
          <tem:GOV_NONGOV_TYPE>P</tem:GOV_NONGOV_TYPE>
-         <tem:NFEI_FLAG>NO</tem:NFEI_FLAG>
+         <tem:NFEI_FLAG>YES</tem:NFEI_FLAG>
          <tem:CustomerBarcodeCode></tem:CustomerBarcodeCode>
          <tem:CustomerBarcodeText></tem:CustomerBarcodeText>
       </tem:PostShipment_CSBV>
