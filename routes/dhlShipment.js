@@ -3,36 +3,47 @@ const axios = require('axios');
 const router = express.Router();
 const numberToWords = require('number-to-words');
 
-const convertAmountToWords = (amount) => {
-  // Split the amount into whole number and decimal (cents)
+const convertAmountToWords = (amount, currency) => {
   const [wholeNumber, decimal] = amount.toString().split('.');
-
-  // Convert the whole number part to words
   let wholeNumberInWords = numberToWords.toWords(wholeNumber).replace(/ and/g, ', and');
-
-  // Capitalize the first letter of the whole number
   wholeNumberInWords = wholeNumberInWords.charAt(0).toUpperCase() + wholeNumberInWords.slice(1);
-
-  // Add "Dollars" after the whole number
   wholeNumberInWords = `${wholeNumberInWords} Dollars`;
-
-  // Handle the decimal part (cents)
   const decimalInWords = decimal ? ` and ${numberToWords.toWords(decimal)} Cents` : '';
-
-  // Construct the final string with "(USD)" at the end
-  return `${wholeNumberInWords}${decimalInWords} only (USD)`;
+  return `${wholeNumberInWords}${decimalInWords} only (${currency}) `;
 };
 
 
 const getCurrentDate = () => {
   const today = new Date();
   const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-based, so add 1
+  const month = String(today.getMonth() + 1).padStart(2, '0'); 
   const day = String(today.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
-// Function to build the SOAP XML with shipping details
+const calculateShippingCharge = (weight, countryCode) => {
+  const baseRate = 10;
+  const weightFactor = 5;
+  return (baseRate + weight * weightFactor).toFixed(2);
+};
+
+router.post('/get-shipping-quote', async (req, res) => {
+  try {
+    const { weight, receiverCountryCode } = req.body;
+    if (!weight || !receiverCountryCode) {
+      throw new Error('Missing required fields: weight or receiverCountryCode');
+    }
+    const shippingCharge = calculateShippingCharge(parseFloat(weight), receiverCountryCode);
+    console.log('Calculated shipping quote:', { weight, countryCode: receiverCountryCode, shippingCharge });
+    res.status(200).json({ shippingCharge });
+  } catch (error) {
+    console.error('Error calculating shipping quote:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+
+
 const buildSOAPXML = (data) => {
 const {
     receiverName,
@@ -43,45 +54,31 @@ const {
     receiverPhone,
     receiverCountryCode,
     declaredValue,
-    // weight,
+    currency = 'USD',
     weight = 1, 
     length,
     width,
     height,
     cartItems, 
+   freightCharge,
   } = data;
 
 
-  const totalDeclaredValue = cartItems.reduce((sum, item) => {
-    return sum + (item.price * item.quantity);
-  }, 0);
-
-  const totalQuantity = cartItems.reduce((sum, item) => {
-    return sum + (item.quantity || 1);
-  }, 0);
-
-  
-
-  // Use declaredValue if provided and valid, otherwise use totalDeclaredValue
+ const totalDeclaredValue = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const dutiableValue = (declaredValue && !isNaN(parseFloat(declaredValue)))
     ? parseFloat(declaredValue).toFixed(2)
     : totalDeclaredValue.toFixed(2);
 
-  // Calculate InvoiceRatePerUnit based on dutiableValue and totalQuantity
+  const totalQuantity = cartItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
   const invoiceRatePerUnit = totalQuantity > 0
     ? (dutiableValue / totalQuantity).toFixed(2)
     : (0).toFixed(2);
 
-  const taxableValue = dutiableValue; // Taxable value same as dutiable value
+  const taxableValue = dutiableValue;
   const shipContents = cartItems.map(item => `${item.name} (x${item.quantity})`).join(', ') || 'General merchandise';
-  
-
-    const totalAmountInWords = convertAmountToWords(dutiableValue);
-
-
-    const currentDate = getCurrentDate();
-
-    const consigneeCountryName = receiverCountryCode === 'US' ? 'United States' : (receiverCountryCode || 'US');
+  const totalAmountInWords = convertAmountToWords(dutiableValue, currency);
+  const currentDate = getCurrentDate();
+  const consigneeCountryName = receiverCountryCode === 'US' ? 'United States' : (receiverCountryCode || 'US');
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/" xmlns:dhl="http://schemas.datacontract.org/2004/07/DHLWCFService.App_Code">
@@ -109,7 +106,7 @@ const {
          <tem:RegistrationNumberIssuerCountryCode></tem:RegistrationNumberIssuerCountryCode>
          <tem:BusinessPartyTypeCode></tem:BusinessPartyTypeCode>
   <tem:DutiableDeclaredvalue>${dutiableValue}</tem:DutiableDeclaredvalue>
-         <tem:DutiableDeclaredCurrency>USD</tem:DutiableDeclaredCurrency>
+         <tem:DutiableDeclaredCurrency>${currency}</tem:DutiableDeclaredCurrency>
          <tem:ShipNumberOfPieces>${cartItems.length}</tem:ShipNumberOfPieces>
          <tem:ShipCurrencyCode>USD</tem:ShipCurrencyCode>
        <tem:ShipPieceWt>${weight || '1'}</tem:ShipPieceWt>
@@ -225,6 +222,35 @@ const {
 };
 
 // Define the route for creating DHL shipment
+// router.post('/create-shipment', async (req, res) => {
+//   try {
+//     const xml = buildSOAPXML(req.body); // Build the XML from the request body
+
+//     // Send SOAP request to DHL API
+//     const response = await axios.post(
+//       'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+//       xml,
+//       {
+//         headers: {
+//           'Content-Type': 'text/xml;charset=UTF-8',
+//           'SOAPAction': 'http://tempuri.org/IDHLService/PostShipment_CSBV',
+//            'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+//         },
+//       }
+//     );
+
+//     // Return the response from DHL back to the frontend
+//     res.status(200).send(response.data); 
+//   } catch (err) {
+//     console.error('DHL SOAP error:', err?.response?.data || err.message);
+//     res.status(500).json({ error: 'Failed to create DHL shipment.' });
+//   }
+// });
+
+// At the top of your Express router file
+const shipments = []; // In-memory store for shipments
+
+// In the /create-shipment route, store the shipment details after successful creation
 router.post('/create-shipment', async (req, res) => {
   try {
     const xml = buildSOAPXML(req.body); // Build the XML from the request body
@@ -237,17 +263,114 @@ router.post('/create-shipment', async (req, res) => {
         headers: {
           'Content-Type': 'text/xml;charset=UTF-8',
           'SOAPAction': 'http://tempuri.org/IDHLService/PostShipment_CSBV',
-           'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+          'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
         },
       }
     );
 
+    // Assuming the DHL API returns an AWB number or shipment ID in the response
+    // Extract relevant details (modify based on actual DHL response structure)
+    const shipmentDetails = {
+      awbNumber: response.data.awbNumber || 'N/A', // Adjust based on DHL response
+      receiverName: req.body.receiverName || 'Test Name',
+      receiverAddress: req.body.receiverAddress || 'Add2',
+      receiverCity: req.body.receiverCity || 'Unknown',
+      receiverPostalCode: req.body.receiverPostalCode || '10001',
+      receiverCountryCode: req.body.receiverCountryCode || 'US',
+      declaredValue: req.body.declaredValue || 0,
+      currency: req.body.currency || 'USD',
+      weight: req.body.weight || 1,
+      createdDate: getCurrentDate(),
+      items: req.body.cartItems || [],
+    };
+
+    // Store the shipment in the in-memory array
+    shipments.push(shipmentDetails);
+
     // Return the response from DHL back to the frontend
-    res.status(200).send(response.data); 
+    res.status(200).send(response.data);
   } catch (err) {
     console.error('DHL SOAP error:', err?.response?.data || err.message);
     res.status(500).json({ error: 'Failed to create DHL shipment.' });
   }
 });
+
+
+
+
+router.post('/fetch-tracking', async (req, res) => {
+  try {
+    const { awbNumber } = req.body;
+    if (!awbNumber) {
+      throw new Error('Missing required field: awbNumber');
+    }
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:PostTracking_AllCheckpoint>
+         <tem:awbnumber>${awbNumber}</tem:awbnumber>
+      </tem:PostTracking_AllCheckpoint>
+   </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const response = await axios.post(
+      'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+      xml,
+      {
+        headers: {
+          'Content-Type': 'text/xml;charset=UTF-8',
+          'SOAPAction': 'http://tempuri.org/IDHLService/PostTracking_AllCheckpoint',
+          'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+        },
+      }
+    );
+
+
+    res.status(200).json({ awbNumber, trackingDetails: response.data });
+  } catch (err) {
+    console.error('DHL Tracking error:', err?.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch tracking details.' });
+  }
+});
+
+
+router.get('/get-all-shipments', async (req, res) => {
+  try {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetAllShipments>
+         <tem:ShipperAccNumber>537986109</tem:ShipperAccNumber>
+         <tem:SiteId>neightivindIN</tem:SiteId>
+         <tem:Password>K@4hK^6yH#2rC$4l</tem:Password>
+      </tem:GetAllShipments>
+   </soapenv:Body>
+</soapenv:Envelope>`;
+
+  const response = await axios.post(
+  'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+  xml,
+  {
+    headers: {
+      'Content-Type': 'text/xml;charset=UTF-8',
+      'SOAPAction': 'http://tempuri.org/IDHLService/GetAllShipments', // Update if necessary
+      'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+    },
+  }
+);
+
+
+    // Parse the SOAP response (you may need xml2js)
+    // For now, assuming it returns a list of shipments
+    res.status(200).json({ shipments: response.data.shipments || [] });
+  } catch (err) {
+    console.error('DHL API error:', err?.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to fetch shipments.' });
+  }
+});
+
 
 module.exports = router;
