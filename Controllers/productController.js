@@ -92,54 +92,81 @@ const productController = {
     }
   },
 
-  updateProduct: async (req, res) => {
-    try {
-      const { name, description, details, amount, dimension, existingImages, sku } = req.body;
-      const product = await Product.findById(req.params.id);
+updateProduct: async (req, res) => {
+  try {
+    const { name, description, details, amount, dimension, existingImages, sku, imagesToDelete } = req.body;
+    const product = await Product.findById(req.params.id);
 
-      if (!product) {
-        return res.status(404).json({ error: "Product not found" });
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    if (name) product.name = name;
+    if (description) product.description = description;
+    if (details) product.details = details;
+    if (amount) product.amount = Number(amount);
+    if (dimension) product.dimension = dimension;
+    if (sku) product.sku = sku;
+
+    // Parse existing images (if sent)
+    let currentImages = [];
+    if (existingImages) {
+      try {
+        currentImages = Array.isArray(existingImages) ? existingImages : JSON.parse(existingImages);
+      } catch (e) {
+        console.error("Invalid existingImages format:", e);
       }
+    }
 
-      if (name) product.name = name;
-      if (description) product.description = description;
-      if (details) product.details = details;
-      if (amount) product.amount = Number(amount);
-      if (dimension) product.dimension = dimension;
-      if (sku) product.sku = sku;
+    // Handle images to delete
+    if (imagesToDelete) {
+      try {
+        const imagesToDeleteArray = Array.isArray(imagesToDelete) ? imagesToDelete : JSON.parse(imagesToDelete);
+        imagesToDeleteArray.forEach(imagePath => {
+          const relativePath = imagePath.startsWith("/") ? imagePath.slice(1) : imagePath;
+          const fullPath = path.join(__dirname, "..", relativePath);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+          }
+        });
+        // Remove deleted images from currentImages
+        currentImages = currentImages.filter(img => !imagesToDeleteArray.includes(img));
+      } catch (e) {
+        console.error("Error processing imagesToDelete:", e);
+      }
+    }
 
-
-      // Parse existing images (if sent)
-      let currentImages = [];
-      if (existingImages) {
-        try {
-          currentImages = Array.isArray(existingImages) ? existingImages : JSON.parse(existingImages);
-        } catch (e) {
-          console.error("Invalid existingImages format:", e);
+    // Handle new images
+    if (req.files && req.files.length > 0) {
+      // Create a map of original filenames to new paths
+      const newImagePaths = req.files.map(file => `/uploads/${file.filename}`);
+      
+      // Replace null values in currentImages with new images
+      for (let i = 0; i < currentImages.length; i++) {
+        if (currentImages[i] === null && newImagePaths.length > 0) {
+          currentImages[i] = newImagePaths.shift();
         }
       }
-
-      // Handle new images
-      let newImagePaths = [];
-      if (req.files && req.files.length > 0) {
-        newImagePaths = req.files.map((file) => `/uploads/${file.filename}`);
-      }
-
-      // Combine existing and new images, ensure no duplicates
-      product.images = [...new Set([...currentImages, ...newImagePaths])];
-
-      // Validate total images
-      if (product.images.length > 7) {
-        return res.status(400).json({ error: "Maximum 7 images allowed." });
-      }
-
-      await product.save();
-      res.status(200).json({ message: "Product updated successfully", product });
-    } catch (error) {
-      console.error("Update error:", error);
-      res.status(500).json({ error: error.message || "Server error while updating product" });
+      
+      // Add any remaining new images to the end
+      currentImages = [...currentImages, ...newImagePaths];
     }
-  },
+
+    // Filter out any null values and ensure unique
+    product.images = [...new Set(currentImages.filter(img => img !== null))];
+
+    // Validate total images
+    if (product.images.length > 7) {
+      return res.status(400).json({ error: "Maximum 7 images allowed." });
+    }
+
+    await product.save();
+    res.status(200).json({ message: "Product updated successfully", product });
+  } catch (error) {
+    console.error("Update error:", error);
+    res.status(500).json({ error: error.message || "Server error while updating product" });
+  }
+},
 
   deleteProduct: async (req, res) => {
     try {
