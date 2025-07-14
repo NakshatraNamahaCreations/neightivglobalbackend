@@ -45,7 +45,7 @@ router.post("/token", async (req, res) => {
 
 router.post("/create-order", async (req, res) => {
   try {
-    const { amount, currency_code = "USD", cartItems } = req.body;
+    const { amount, currency_code, cartItems } = req.body;
 
     const numericAmount = parseFloat(amount);
     if (!amount || isNaN(numericAmount) || numericAmount <= 0) {

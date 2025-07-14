@@ -15,7 +15,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // Increased to 20MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|webp/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -40,6 +40,11 @@ router
   .route("/")
   .post(upload.array("images", 7), productController.createProduct)
   .get(productController.getAllProducts);
+
+router.get("/inventory", productController.getInventory);
+
+router.post("/check-stock", productController.checkStock);
+router.post("/update-stock", productController.updateStock);
 
 router
   .route("/:id")

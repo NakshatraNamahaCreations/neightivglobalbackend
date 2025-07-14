@@ -11,6 +11,8 @@ const shiprocketRoutes = require("./routes/shiprocketRoutes");
 // const dhlRoutes = require('./routes/dhlRoutes');
 const dhlRoutes = require('./routes/dhlShipment');
 const phonepeRoutes = require('./routes/phonepePayment');
+const contactRoutes = require('./routes/contactRoutes');
+const dhlOrderRoutes = require('./routes/dhlOrderRoutes');
 
 dotenv.config();
 const app = express();
@@ -72,7 +74,8 @@ app.use("/api/shiprocket", shiprocketRoutes);
 // app.use('/api/dhl', dhlRoutes);
 app.use('/api/dhl', dhlRoutes);
 app.use('/api/phonepe', phonepeRoutes);
-
+app.use('/api', contactRoutes);
+app.use('/api', dhlOrderRoutes);
 
 
 app.use((req, res, next) => {

@@ -4,19 +4,12 @@ const router = express.Router();
 const numberToWords = require('number-to-words');
 const xml2js = require('xml2js');
 const currency = require('currency.js');
+const DhlOrder = require('../models/DhlOrder'); 
+const pdfParse = require('pdf-parse'); 
 
 const validCountryCodes = [
-  'US', 'CN', 'GB', 'CA', 'AU', 'DE', 'FR', 'JP', 'BR', 'MX',// Add more as needed
+  'US', 'CN', 'GB', 'CA', 'AU', 'DE', 'FR', 'JP', 'BR', 'MX','IN', 'AE',
 ];
-
-// const convertAmountToWords = (amount, currency) => {
-//   const [wholeNumber, decimal] = amount.toString().split('.');
-//   let wholeNumberInWords = numberToWords.toWords(wholeNumber).replace(/ and/g, ', and');
-//   wholeNumberInWords = wholeNumberInWords.charAt(0).toUpperCase() + wholeNumberInWords.slice(1);
-//   wholeNumberInWords = `${wholeNumberInWords} Dollars`;
-//   const decimalInWords = decimal ? ` and ${numberToWords.toWords(decimal)} Cents` : '';
-//   return `${wholeNumberInWords}${decimalInWords} only (${currency}) `;
-// };
 
 
 const currencyUnits = {
@@ -372,11 +365,170 @@ router.post('/calculate-shipping-charge', async (req, res) => {
 });
 
 // Existing create-shipment endpoint
+// router.post('/create-shipment', async (req, res) => {
+//   try {
+//     const { receiverCountryCode } = req.body;
+//     validateCountryCode(receiverCountryCode); 
+//     const xml = buildSOAPXML(req.body);
+//     const response = await axios.post(
+//       'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+//       xml,
+//       {
+//         headers: {
+//           'Content-Type': 'text/xml;charset=UTF-8',
+//           'SOAPAction': 'http://tempuri.org/IDHLService/PostShipment_CSBV',
+//           'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+//         },
+//       }
+//     );
+//     res.status(200).send(response.data);
+//   } catch (err) {
+//     console.error('DHL SOAP error:', err?.response?.data || err.message);
+//     res.status(400).json({ error: err.message || 'Failed to create DHL shipment.' });
+//   }
+// });
+
+
+// router.post('/create-shipment', async (req, res) => {
+//   try {
+//     const { receiverCountryCode } = req.body;
+//     validateCountryCode(receiverCountryCode);
+//     const xml = buildSOAPXML(req.body);
+
+//     // Make the API call to DHL service
+//     const response = await axios.post(
+//       'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+//       xml,
+//       {
+//         headers: {
+//           'Content-Type': 'text/xml;charset=UTF-8',
+//           'SOAPAction': 'http://tempuri.org/IDHLService/PostShipment_CSBV',
+//           'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+//         },
+//       }
+//     );
+
+//     // Extract <PostShipment_CSBVResult> content
+//     const resultMatch = response.data.match(/<PostShipment_CSBVResult>(.*?)<\/PostShipment_CSBVResult>/s);
+//     const resultText = resultMatch ? resultMatch[1].trim() : '';
+
+//     // Extract both PDF URLs
+//     const urls = resultText.match(/https?:\/\/[^\s;]+\.pdf/gi);
+//     const [shipmentPdfPath, invoicePath] = urls || [];
+
+//     if (!shipmentPdfPath || !invoicePath) {
+//       throw new Error('Could not extract both shipment and invoice PDF URLs from DHL response');
+//     }
+
+//     // Download and parse both PDFs
+//     const [shipmentRes, invoiceRes] = await Promise.all([
+//       axios.get(shipmentPdfPath, { responseType: 'arraybuffer' }),
+//       axios.get(invoicePath, { responseType: 'arraybuffer' }),
+//     ]);
+
+//     const [shipmentParsed, invoiceParsed] = await Promise.all([
+//       pdfParse(shipmentRes.data),
+//       pdfParse(invoiceRes.data),
+//     ]);
+
+//     const pdfData = {
+//       shipmentPdf: { text: shipmentParsed.text },
+//       invoicePdf: { text: invoiceParsed.text },
+//     };
+
+//     // Extract AWB number from PDF text
+//     const awbMatch = invoiceParsed.text.match(/AWB\s*No\s*[:\-]?\s*(\d{8,})/i);
+//     const awbNo = awbMatch ? awbMatch[1].trim() : null;
+
+//     if (!awbNo) {
+//       throw new Error('AWB number not found in Invoice PDF');
+//     }
+
+//     // Optional fields (safely extracted)
+//     const mobileMatch = invoiceParsed.text.match(/Telephone No[:\-]?\s*(\d+)/i);
+//     const billToMatch = invoiceParsed.text.match(/Bill To Party\s+(.+?)\s+/i);
+
+//     const mobileNumber = mobileMatch ? mobileMatch[1].trim() : '';
+//     const billToPartyCompany = billToMatch ? billToMatch[1].trim() : '';
+
+
+//     console.log(awbNo,
+//       billToPartyCompany,
+//       mobileNumber,
+//       invoicePath,
+//       shipmentPdfPath,)
+//     // Save to MongoDB
+//     const newDhlOrder = new DhlOrder({
+//       awbNo,
+//       billToPartyCompany,
+//       mobileNumber,
+//       invoicePath,
+//       shipmentPdfPath,
+//       pdfData,
+//         receiverName: req.body.receiverName || '',      
+//   receiverPhone: req.body.receiverPhone || '', 
+//       status: 'Shipped',
+//     });
+
+//     await newDhlOrder.save();
+//     console.log('✅ DHL order saved');
+
+//     res.status(200).json({
+//       message: 'DHL order created successfully',
+//       awbNo,
+//       invoicePath,
+//       shipmentPdfPath,
+//     });
+
+//   } catch (err) {
+//     console.error('❌ DHL create-shipment error:', err?.response?.data || err.message);
+//     res.status(400).json({ error: err.message || 'Failed to create DHL shipment' });
+//   }
+// });
+
 router.post('/create-shipment', async (req, res) => {
   try {
-    const { receiverCountryCode } = req.body;
-    validateCountryCode(receiverCountryCode); // Validate country code
+    const {
+      receiverCountryCode,
+      receiverName,
+      receiverAddress,
+      receiverCity,
+      receiverPostalCode,
+      receiverStateCode,
+      receiverPhone,
+      declaredValue,
+      currency = 'USD',
+      weight,
+      length,
+      width,
+      height,
+      cartItems,
+      freightCharge,
+      cookie,
+    } = req.body;
+
+    // Validate required fields
+    if (!receiverCountryCode || !receiverName || !receiverAddress || !receiverCity || !receiverPostalCode || !cartItems || !Array.isArray(cartItems)) {
+      return res.status(400).json({
+        error: 'Missing required fields: receiverCountryCode, receiverName, receiverAddress, receiverCity, receiverPostalCode, cartItems',
+      });
+    }
+
+    // Validate country code
+    const validatedCountryCode = validateCountryCode(receiverCountryCode);
+
+    // Validate currency
+    const validCurrencies = Object.keys(currencyUnits);
+    if (!validCurrencies.includes(currency.toUpperCase())) {
+      return res.status(400).json({
+        error: `Invalid currency code: ${currency}. Must be one of ${validCurrencies.join(', ')}.`,
+      });
+    }
+
+    // Build SOAP XML
     const xml = buildSOAPXML(req.body);
+
+    // Make SOAP request
     const response = await axios.post(
       'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
       xml,
@@ -384,16 +536,289 @@ router.post('/create-shipment', async (req, res) => {
         headers: {
           'Content-Type': 'text/xml;charset=UTF-8',
           'SOAPAction': 'http://tempuri.org/IDHLService/PostShipment_CSBV',
-          'Cookie': req.body.cookie || 'YOUR_COOKIE_HERE',
+          'Cookie': cookie || 'YOUR_COOKIE_HERE',
         },
       }
     );
-    res.status(200).send(response.data);
+
+    // Extract <PostShipment_CSBVResult> content
+    const resultMatch = response.data.match(/<PostShipment_CSBVResult>(.*?)<\/PostShipment_CSBVResult>/s);
+    const resultText = resultMatch ? resultMatch[1].trim() : '';
+
+    // Extract PDF URLs
+    const urls = resultText.match(/https?:\/\/[^\s;]+\.pdf/gi);
+    const [shipmentPdfPath, invoicePath] = urls || [];
+
+    if (!shipmentPdfPath || !invoicePath) {
+      throw new Error('Could not extract both shipment and invoice PDF URLs from DHL response');
+    }
+
+    // Download and parse PDFs
+    const [shipmentRes, invoiceRes] = await Promise.all([
+      axios.get(shipmentPdfPath, { responseType: 'arraybuffer' }),
+      axios.get(invoicePath, { responseType: 'arraybuffer' }),
+    ]);
+
+    const [shipmentParsed, invoiceParsed] = await Promise.all([
+      pdfParse(shipmentRes.data),
+      pdfParse(invoiceRes.data),
+    ]);
+
+    const pdfData = {
+      shipmentPdf: { text: shipmentParsed.text },
+      invoicePdf: { text: invoiceParsed.text },
+    };
+
+    // Extract AWB number
+    const awbMatch = invoiceParsed.text.match(/AWB\s*No\s*[:\-]?\s*(\d{8,})/i);
+    const awbNo = awbMatch ? awbMatch[1].trim() : null;
+
+    if (!awbNo) {
+      throw new Error('AWB number not found in Invoice PDF');
+    }
+
+    // Extract optional fields
+    const mobileMatch = invoiceParsed.text.match(/Telephone No[:\-]?\s*(\d+)/i);
+    const billToMatch = invoiceParsed.text.match(/Bill To Party\s+(.+?)\s+/i);
+
+    const mobileNumber = mobileMatch ? mobileMatch[1].trim() : '';
+    const billToPartyCompany = billToMatch ? billToMatch[1].trim() : '';
+
+    // Save to MongoDB
+    const newDhlOrder = new DhlOrder({
+      awbNo,
+      billToPartyCompany,
+      mobileNumber,
+      invoicePath,
+      shipmentPdfPath,
+      pdfData,
+      receiverName: receiverName || '',
+      receiverPhone: receiverPhone || '',
+      status: 'Shipped',
+    });
+
+    await newDhlOrder.save();
+    console.log('✅ DHL order saved');
+
+    res.status(200).json({
+      message: 'DHL order created successfully',
+      awbNo,
+      invoicePath,
+      shipmentPdfPath,
+    });
   } catch (err) {
-    console.error('DHL SOAP error:', err?.response?.data || err.message);
-    res.status(400).json({ error: err.message || 'Failed to create DHL shipment.' });
+    console.error('❌ DHL create-shipment error:', err?.response?.data || err.message);
+    res.status(400).json({
+      error: 'Failed to create DHL shipment',
+      details: err.message || 'An unexpected error occurred',
+    });
   }
 });
+
+router.post('/schedule-pickup', async (req, res) => {
+  try {
+    const {
+      ShipperCompName,
+      ShipperAdd1,
+      ShipperAdd2,
+      ShipperAdd3,
+      PackageLocation,
+      Shippercity,
+      ShipperPostCode,
+      ShipperCountyCode,
+      ShipperName,
+      ShipperPhone,
+      PickupClosingTimeHrs,
+      PickupClosingTimeMins,
+      Pieces,
+      PickupWeight,
+      PickupContactName,
+      PickupContactPhone,
+      PickupDate,
+      ReadyByTime,
+      AccountNumber,
+      cookie,
+    } = req.body;
+
+    // Validate required fields
+    const requiredFields = {
+      ShipperCompName,
+      ShipperAdd1,
+      Shippercity,
+      ShipperPostCode,
+      ShipperCountyCode,
+      ShipperName,
+      ShipperPhone,
+      PickupClosingTimeHrs,
+      PickupClosingTimeMins,
+      Pieces,
+      PickupWeight,
+      PickupContactName,
+      PickupContactPhone,
+      PickupDate,
+      ReadyByTime,
+      AccountNumber,
+      cookie,
+    };
+
+    const missingFields = Object.keys(requiredFields).filter(
+      (key) => requiredFields[key] === undefined || requiredFields[key] === null || requiredFields[key] === ''
+    );
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: `Missing or empty required fields: ${missingFields.join(', ')}`,
+      });
+    }
+
+    // Validate country code
+    const validatedCountryCode = validateCountryCode(ShipperCountyCode);
+
+    // Validate numeric fields
+    if (isNaN(Pieces) || Pieces <= 0) {
+      return res.status(400).json({
+        error: 'Pieces must be a positive number',
+      });
+    }
+    if (isNaN(PickupWeight) || PickupWeight <= 0) {
+      return res.status(400).json({
+        error: 'PickupWeight must be a positive number',
+      });
+    }
+
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(PickupDate)) {
+      return res.status(400).json({
+        error: 'Invalid PickupDate format. Use YYYY-MM-DD.',
+      });
+    }
+
+    // Validate date is today or future
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const pickupDateObj = new Date(PickupDate);
+    if (pickupDateObj < today) {
+      return res.status(400).json({
+        error: 'PickupDate must be today or in the future.',
+      });
+    }
+
+    // Validate time formats
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(ReadyByTime)) {
+      return res.status(400).json({
+        error: 'Invalid ReadyByTime format. Use HH:MM (24-hour).',
+      });
+    }
+    if (!/^\d{2}$/.test(PickupClosingTimeHrs) || parseInt(PickupClosingTimeHrs) > 23) {
+      return res.status(400).json({
+        error: 'Invalid PickupClosingTimeHrs. Must be 00-23.',
+      });
+    }
+    if (!/^\d{2}$/.test(PickupClosingTimeMins) || parseInt(PickupClosingTimeMins) > 59) {
+      return res.status(400).json({
+        error: 'Invalid PickupClosingTimeMins. Must be 00-59.',
+      });
+    }
+
+    // Build SOAP XML for pickup request
+    const soapRequest = `
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+         <soapenv:Header/>
+         <soapenv:Body>
+            <tem:PostPickup>
+               <tem:ShipperCompName>${ShipperCompName}</tem:ShipperCompName>
+               <tem:ShipperAdd1>${ShipperAdd1}</tem:ShipperAdd1>
+               <tem:ShipperAdd2>${ShipperAdd2 || ''}</tem:ShipperAdd2>
+               <tem:ShipperAdd3>${ShipperAdd3 || ''}</tem:ShipperAdd3>
+               <tem:PackageLocation>${PackageLocation || 'Front Desk'}</tem:PackageLocation>
+               <tem:Shippercity>${Shippercity}</tem:Shippercity>
+               <tem:ShipperPostCode>${ShipperPostCode}</tem:ShipperPostCode>
+               <tem:ShipperCountyCode>${validatedCountryCode}</tem:ShipperCountyCode>
+               <tem:ShipperName>${ShipperName}</tem:ShipperName>
+               <tem:ShipperPhone>${ShipperPhone}</tem:ShipperPhone>
+               <tem:PickupClosingTimeHrs>${PickupClosingTimeHrs}</tem:PickupClosingTimeHrs>
+               <tem:PickupClosingTimeMins>${PickupClosingTimeMins}</tem:PickupClosingTimeMins>
+               <tem:Pieces>${Pieces}</tem:Pieces>
+               <tem:PickupWeight>${PickupWeight}</tem:PickupWeight>
+               <tem:PickupContactName>${PickupContactName}</tem:PickupContactName>
+               <tem:PickupContactPhone>${PickupContactPhone}</tem:PickupContactPhone>
+               <tem:PickupDate>${PickupDate}</tem:PickupDate>
+               <tem:ReadyByTime>${ReadyByTime}</tem:ReadyByTime>
+               <tem:AccountNumber>${AccountNumber}</tem:AccountNumber>
+            </tem:PostPickup>
+         </soapenv:Body>
+      </soapenv:Envelope>`;
+
+    // Log the SOAP request for debugging
+    console.log('SOAP Request:', soapRequest);
+
+    // Make SOAP request to DHL API
+    const response = await axios.post(
+      'https://api.india.express.dhl.com/DHLWCFService_V6/DHLService.svc',
+      soapRequest,
+      {
+        headers: {
+          'Content-Type': 'text/xml;charset=UTF-8',
+          'SOAPAction': 'http://tempuri.org/IDHLService/PostPickup',
+          'Cookie': cookie || 'BIGipServerpl_dhlindiaplugin.com_443=!kfK86nQDmrO5xHN7MRQuST572YnrLoX+aA9KG8LvRIoHyHDhKvVgxCohP45xRRZHulE7tIVNWMbx4H8=; TS019cb396=010448b6557e17734619b004fae56ca049e24d13e4dbb0d9f28ebb249618f176d43bbee665ad32c4edd7daf2f9f4ec340e1fba98ff',
+        },
+      }
+    );
+
+    // Log the raw SOAP response for debugging
+    console.log('Raw SOAP Response:', response.data);
+
+    // Parse SOAP response
+    const parser = new xml2js.Parser({
+      explicitArray: false,
+      ignoreAttrs: true,
+      tagNameProcessors: [xml2js.processors.stripPrefix],
+    });
+
+    const result = await parser.parseStringPromise(response.data);
+    const pickupResult = result?.Envelope?.Body?.PostPickupResponse?.PostPickupResult;
+
+    if (!pickupResult) {
+      throw new Error('No PostPickupResult found in SOAP response.');
+    }
+
+    // Attempt to extract confirmation details (adjust based on actual DHL response structure)
+    let confirmationId = pickupResult;
+    let trackingNumber = null;
+    if (typeof pickupResult === 'string') {
+      const confirmationMatch = pickupResult.match(/Confirmation\s*Number\s*[:\-]\s*(\w+)/i);
+      confirmationId = confirmationMatch ? confirmationMatch[1] : pickupResult;
+      const trackingMatch = pickupResult.match(/Tracking\s*Number\s*[:\-]\s*(\w+)/i);
+      trackingNumber = trackingMatch ? trackingMatch[1] : null;
+    }
+
+    // Check for error in response
+    if (pickupResult.includes('Error') || pickupResult.includes('Failed')) {
+      throw new Error(`Pickup request failed: ${pickupResult}`);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Pickup scheduled successfully',
+      confirmationId: confirmationId,
+      pickupDate: PickupDate,
+      readyByTime: ReadyByTime,
+      trackingNumber: trackingNumber,
+    });
+  } catch (error) {
+    console.error('❌ DHL schedule-pickup error:', error?.response?.data || error.message);
+    console.error('Error Stack:', error.stack);
+    res.status(400).json({
+      status: 'error',
+      error: 'Failed to schedule DHL pickup',
+      details: error.message || 'An unexpected error occurred',
+    });
+  }
+});
+
+
+
 
 
 
