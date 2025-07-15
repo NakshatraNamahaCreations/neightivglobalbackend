@@ -9,6 +9,7 @@ const OrderSchema = new mongoose.Schema({
       name: String,
       price: Number, // Price in INR
       quantity: Number,
+      
     },
   ],
   total: { type: Number, required: true }, // Total in INR

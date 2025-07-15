@@ -136,152 +136,98 @@ router.post("/create-order", async (req, res) => {
   }
 });
 
-router.get("/capture-order", async (req, res) => {
-  const { token } = req.query;
+router.get('/capture-order', async (req, res) => {
+  const { token, invoiceUrls, awbNo } = req.query;
 
   if (!token) {
-    return res.status(400).json({ message: "Order token is required." });
+    return res.status(400).json({ message: 'Order token is required.' });
+  }
+
+  if (!invoiceUrls || !awbNo) {
+    return res.status(400).json({ message: 'DHL invoice URLs and AWB number are required.' });
   }
 
   try {
     // Capture PayPal order
-    const tokenResponse = await fetch("https://api.paypal.com/v1/oauth2/token", {
-      method: "POST",
+    const tokenResponse = await fetch('https://api.paypal.com/v1/oauth2/token', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString("base64")}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64')}`,
       },
-      body: new URLSearchParams({ grant_type: "client_credentials" }),
+      body: new URLSearchParams({ grant_type: 'client_credentials' }),
     });
     const { access_token } = await tokenResponse.json();
 
+    if (!tokenResponse.ok) {
+      throw new Error('Failed to obtain access token');
+    }
+
     const captureResponse = await fetch(`https://api.paypal.com/v2/checkout/orders/${token}/capture`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         Authorization: `Bearer ${access_token}`,
       },
     });
     const captureResult = await captureResponse.json();
 
     if (!captureResponse.ok) {
-      throw new Error(captureResult.details?.[0]?.description || "Failed to capture order");
+      throw new Error(captureResult.details?.[0]?.description || 'Failed to capture order');
     }
 
-    // Default shipping details if PayPal doesn't provide them
+    // Extract shipping details from PayPal response or use defaults
     const shippingDetails = {
-      name: captureResult.purchase_units[0]?.shipping?.name?.full_name || "Customer",
-      address: captureResult.purchase_units[0]?.shipping?.address?.address_line_1 || "123 Main Street",
-      city: captureResult.purchase_units[0]?.shipping?.address?.admin_area_2 || "Bengaluru",
-      state: captureResult.purchase_units[0]?.shipping?.address?.admin_area_1 || "Karnataka",
-      country: captureResult.purchase_units[0]?.shipping?.address?.country_code || "IN",
-      pincode: captureResult.purchase_units[0]?.shipping?.address?.postal_code || "560034",
-      phone: captureResult.payer?.phone?.phone_number?.national_number || "+919845588222",
-      email: captureResult.payer?.email_address || "customer@example.com",
+      name: captureResult.purchase_units[0]?.shipping?.name?.full_name || 'Customer',
+      address: captureResult.purchase_units[0]?.shipping?.address?.address_line_1 || 'N/A',
+      city: captureResult.purchase_units[0]?.shipping?.address?.admin_area_2 || 'N/A',
+      state: captureResult.purchase_units[0]?.shipping?.address?.admin_area_1 || 'N/A',
+      country: captureResult.purchase_units[0]?.shipping?.address?.country_code || 'N/A',
+      pincode: captureResult.purchase_units[0]?.shipping?.address?.postal_code || 'N/A',
+      phone: captureResult.payer?.phone?.phone_number?.national_number || 'N/A',
+      email: captureResult.payer?.email_address || 'customer@example.com',
     };
+
+    // Decode invoiceUrls and awbNo
+    const decodedInvoiceUrls = JSON.parse(decodeURIComponent(invoiceUrls));
+    const decodedAwbNo = decodeURIComponent(awbNo);
 
     // Save PayPal order to MongoDB
     const order = new Order({
       paypalOrderId: captureResult.id,
-      userId: null,
+      userId: null, // Update if you have user authentication
       items: captureResult.purchase_units[0].items
         ? captureResult.purchase_units[0].items.map((item) => ({
-            productId: item.sku || "N/A",
+            productId: item.sku || 'N/A',
             name: item.name,
-            price: parseFloat(item.unit_amount.value) / 0.012,
+            price: parseFloat(item.unit_amount.value),
             quantity: parseInt(item.quantity),
           }))
         : [],
-      total: parseFloat(captureResult.purchase_units[0].amount.value) / 0.012,
-      currency: "INR",
+      total: parseFloat(captureResult.purchase_units[0].amount.value),
+      currency: captureResult.purchase_units[0].amount.currency_code,
       shippingAddress: shippingDetails,
+      invoiceUrls: decodedInvoiceUrls, // Store DHL invoice URLs
+      awbNo: decodedAwbNo, // Store DHL AWB number
+      status: 'Paid',
     });
     await order.save();
 
-    // Create Shiprocket order
-    const shiprocketHeaders = new Headers();
-    shiprocketHeaders.append("Content-Type", "application/json");
+    console.log('✅ PayPal Order Captured:', captureResult.id);
+    console.log('✅ DHL Shipment Details:', { invoiceUrls: decodedInvoiceUrls, awbNo: decodedAwbNo });
 
-    const shiprocketLoginRaw = JSON.stringify({
-      email: process.env.SHIPROCKET_EMAIL,
-      password: process.env.SHIPROCKET_PASSWORD,
-    });
-
-    const shiprocketLoginResponse = await fetch(`${process.env.SHIPROCKET_API_URL}/auth/login`, {
-      method: "POST",
-      headers: shiprocketHeaders,
-      body: shiprocketLoginRaw,
-    });
-    const shiprocketLoginResult = await shiprocketLoginResponse.json();
-
-    if (!shiprocketLoginResponse.ok) {
-      throw new Error(shiprocketLoginResult.message || "Failed to authenticate with Shiprocket");
-    }
-
-    shiprocketHeaders.set("Authorization", `Bearer ${shiprocketLoginResult.token}`);
-
-    const shiprocketOrderRaw = JSON.stringify({
-      order_id: captureResult.id,
-      order_date: new Date().toISOString().split("T")[0],
-      pickup_location: "Primary",
-      billing_customer_name: shippingDetails.name.split(" ")[0] || shippingDetails.name,
-      billing_last_name: shippingDetails.name.split(" ")[1] || "",
-      billing_address: shippingDetails.address,
-      billing_city: shippingDetails.city,
-      billing_pincode: shippingDetails.pincode,
-      billing_state: shippingDetails.state,
-      billing_country: shippingDetails.country === "IN" ? "India" : shippingDetails.country,
-      billing_email: shippingDetails.email,
-      billing_phone: shippingDetails.phone,
-      shipping_is_billing: true,
-      order_items: captureResult.purchase_units[0].items
-        ? captureResult.purchase_units[0].items.map((item) => ({
-            name: item.name,
-            sku: item.sku || `SKU_${item.name}`,
-            units: parseInt(item.quantity),
-            selling_price: parseFloat(item.unit_amount.value) / 0.012,
-            hsn: "6109",
-          }))
-        : [],
-      payment_method: "Prepaid",
-      sub_total: parseFloat(captureResult.purchase_units[0].amount.value) / 0.012,
-      length: 10,
-      breadth: 10,
-      height: 1,
-      weight: 0.5,
-    });
-
-    const shiprocketOrderResponse = await fetch(`${process.env.SHIPROCKET_API_URL}/orders/create/adhoc`, {
-      method: "POST",
-      headers: shiprocketHeaders,
-      body: shiprocketOrderRaw,
-    });
-    const shiprocketOrderResult = await shiprocketOrderResponse.json();
-
-    if (!shiprocketOrderResponse.ok) {
-      throw new Error(shiprocketOrderResult.message || "Failed to create Shiprocket order");
-    }
-
-    // Update MongoDB with Shiprocket details
-    await Order.findOneAndUpdate(
-      { paypalOrderId: captureResult.id },
-      {
-        shiprocketOrderId: shiprocketOrderResult.order_id,
-        shipmentId: shiprocketOrderResult.shipment_id,
-        shippingStatus: "created",
-        shippingAddress: shippingDetails,
-      },
-      { new: true }
+    // Redirect to success page with invoiceUrls and awbNo
+    res.redirect(
+      `https://neightivglobal.com/paypal-success?status=success&invoiceUrls=${encodeURIComponent(
+        JSON.stringify(decodedInvoiceUrls)
+      )}&awbNo=${encodeURIComponent(decodedAwbNo)}`
     );
-
-    console.log("✅ PayPal Order Captured:", captureResult.id);
-    console.log("✅ Shiprocket Order Created:", shiprocketOrderResult.order_id);
-    res.redirect("https://neightivglobal.com/paypal-success?status=success");
   } catch (error) {
-    console.error("❌ PayPal Capture Error:", error.message);
+    console.error('❌ PayPal Capture Error:', error.message);
     res.redirect(`https://neightivglobal.com/paypal-cancel?error=${encodeURIComponent(error.message)}`);
   }
 });
+
 
 router.get("/cancel-order", async (req, res) => {
   console.log("❌ PayPal Payment Cancelled");

@@ -525,6 +525,22 @@ router.post('/create-shipment', async (req, res) => {
       });
     }
 
+
+    const items = cartItems.map(item => ({
+      productId: item.sku, // Adjust to item.id if necessary
+      quantity: item.quantity,
+    }));
+
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        return res.status(404).json({ error: `Product not found: ${item.productId}` });
+      }
+      if (product.stock < item.quantity) {
+        return res.status(400).json({ error: `Insufficient stock for ${product.name}` });
+      }
+    }
+
     // Build SOAP XML
     const xml = buildSOAPXML(req.body);
 
@@ -599,6 +615,16 @@ router.post('/create-shipment', async (req, res) => {
 
     await newDhlOrder.save();
     console.log('✅ DHL order saved');
+
+    // Update stock after successful shipment creation
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (product) {
+        product.stock -= item.quantity;
+        product.soldStock = (product.soldStock || 0) + item.quantity;
+        await product.save();
+      }
+    }
 
     res.status(200).json({
       message: 'DHL order created successfully',
