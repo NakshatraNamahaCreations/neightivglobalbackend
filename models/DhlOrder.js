@@ -1,35 +1,53 @@
-// // models/DhlOrder.js
-// const mongoose = require('mongoose');
+
+const mongoose = require('mongoose');
 
 // const DhlOrderSchema = new mongoose.Schema({
-// awbNo: { type: String, required: true },
+//   awbNo: { type: String, required: true },
 //   billToPartyCompany: String,
 //   mobileNumber: String,
 //   invoicePath: String,
-//   pdfData: Object,  // Storing the JSON data of the PDF
+//   shipmentPdfPath: String,
+//   pdfData: {
+//     invoicePdf: Object,
+//     shipmentPdf: Object,
+//   },
+//   receiverName: String,
+//   receiverPhone: String,
 //   status: String,
-// });
-
-// module.exports = mongoose.model('DhlOrder', DhlOrderSchema);
-
-
-// models/DhlOrder.js
-const mongoose = require('mongoose');
+// }, { timestamps: true });
 
 const DhlOrderSchema = new mongoose.Schema({
-  awbNo: { type: String, required: true },
+  awbNo: String,
   billToPartyCompany: String,
   mobileNumber: String,
   invoicePath: String,
   shipmentPdfPath: String,
-  pdfData: {
+   pdfData: {
     invoicePdf: Object,
     shipmentPdf: Object,
   },
   receiverName: String,
   receiverPhone: String,
+  receiverEmail: String,
+  receiverAddress: String,
+  receiverCity: String,
+  receiverPostalCode: String,
+  receiverStateCode: String,
+  receiverCountryCode: String,
+  subtotal: Number,
+  freightCharge: Number,
+  total: Number,
+  currency: String,
+  cartItems: [
+    {
+      name: String,
+      price: Number,
+      quantity: Number,
+      sku: String,
+    },
+  ],
   status: String,
-}, { timestamps: true });
+});
 
 module.exports = mongoose.model('DhlOrder', DhlOrderSchema);
 

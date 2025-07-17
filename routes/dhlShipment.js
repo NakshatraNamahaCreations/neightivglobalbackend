@@ -6,6 +6,9 @@ const xml2js = require('xml2js');
 const currency = require('currency.js');
 const DhlOrder = require('../models/DhlOrder'); 
 const pdfParse = require('pdf-parse'); 
+const Product = require("../models/Product");
+const nodemailer = require('nodemailer');
+
 
 const validCountryCodes = [
   'US', 'CN', 'GB', 'CA', 'AU', 'DE', 'FR', 'JP', 'BR', 'MX','IN', 'AE',
@@ -57,6 +60,109 @@ const getCurrentDate = () => {
   const month = String(today.getMonth() + 1).padStart(2, '0'); 
   const day = String(today.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp.zoho.in',
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.EMAIL_USER || 'contact@neightivglobal.com',
+    pass: process.env.EMAIL_PASS || 'Kalpana@neightivglobal2025', // Use app-specific password
+  },
+  requireTLS: true,
+  debug: true,
+  logger: true,
+});
+
+const verifyTransporter = async () => {
+  try {
+    await transporter.verify();
+    console.log('✅ DHL Order Confirmation SMTP connection verified successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ DHL Order Confirmation SMTP connection verification failed:', error.message, error.stack);
+    return false;
+  }
+};
+
+const sendOrderConfirmationEmail = async (order, cartItems, currency) => {
+  try {
+    if (!order.receiverEmail) {
+      throw new Error('Recipient email is missing or invalid');
+    }
+
+    const emailContent = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; background-color: #f9f9f9;">
+        <h2 style="color: #333;">📦 Thank You for Your Order!</h2>
+        <p style="font-size: 16px;">Dear ${order.receiverName || 'Customer'},</p>
+        <p style="font-size: 16px;">Your order has been successfully placed with Neightiv Global. Below are the details of your order:</p>
+
+        <h3 style="color: #333; margin-top: 20px;">Order Details</h3>
+        <p><strong>AWB Number:</strong> ${order.awbNo || '-'}</p>
+        <p><strong>Shipment PDF:</strong> <a href="${order.shipmentPdfPath || '#'}">Download Shipment PDF</a></p>
+        <p><strong>Invoice PDF:</strong> <a href="${order.invoicePath || '#'}">Download Invoice PDF</a></p>
+
+        <h3 style="color: #333; margin-top: 20px;">Items Ordered</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background-color: #e0e0e0;">
+            <th style="padding: 10px; text-align: left;">Item</th>
+            <th style="padding: 10px; text-align: left;">Quantity</th>
+            <th style="padding: 10px; text-align: left;">Price</th>
+            <th style="padding: 10px; text-align: left;">Total</th>
+          </tr>
+          ${(cartItems || [])
+            .map(
+              (item) => `
+              <tr>
+                <td style="padding: 10px;">${item.name || '-'}</td>
+                <td style="padding: 10px;">${item.quantity || 0}</td>
+                <td style="padding: 10px;">${currency} ${(item.price || 0).toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                <td style="padding: 10px;">${currency} ${(item.price * item.quantity || 0).toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+              </tr>`
+            )
+            .join('')}
+        </table>
+
+        <h3 style="color: #333; margin-top: 20px;">Shipping Address</h3>
+        <p>${order.receiverName || ''}</p>
+        <p>${order.receiverAddress || ''}</p>
+        <p>${order.receiverCity || ''}, ${order.receiverStateCode || ''} ${order.receiverPostalCode || ''}</p>
+        <p>${order.receiverCountryCode || ''}</p>
+        <p><strong>Phone:</strong> ${order.receiverPhone || ''}</p>
+        <p><strong>Email:</strong> <a href="mailto:${order.receiverEmail || ''}" style="color: #007bff;">${order.receiverEmail || ''}</a></p>
+
+        <h3 style="color: #333; margin-top: 20px;">Order Summary</h3>
+        <p><strong>Subtotal:</strong> ${currency} ${(order.subtotal || 0).toLocaleString('en', { minimumFractionDigits: 2 })}</p>
+        <p><strong>Shipping Charges:</strong> ${currency} ${(order.freightCharge || 0).toLocaleString('en', { minimumFractionDigits: 2 })}</p>
+        <p><strong>Grand Total:</strong> ${currency} ${(order.total || 0).toLocaleString('en', { minimumFractionDigits: 2 })}</p>
+
+        <p style="font-size: 14px; color: #555; margin-top: 20px;">
+          Thank you for shopping with Neightiv Global! You'll receive updates on your order status soon.
+          For any questions, contact us at <a href="mailto:contact@neightivglobal.com" style="color: #007bff;">contact@neightivglobal.com</a>.
+        </p>
+      </div>
+    `;
+
+    const mailOptions = {
+      from: `"Neightiv Global" <${process.env.EMAIL_USER}>`,
+      to: order.receiverEmail,
+      subject: `📦 Order Confirmation - AWB ${order.awbNo || 'Unknown Order'}`,
+      html: emailContent,
+    };
+
+    const smtpVerified = await verifyTransporter();
+    if (!smtpVerified) {
+      throw new Error('SMTP connection verification failed');
+    }
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ Order confirmation email sent to ${mailOptions.to}: Message ID ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ DHL Order Confirmation Email Error:', error.message, error.stack);
+    throw error;
+  }
 };
 
 
@@ -496,6 +602,7 @@ router.post('/create-shipment', async (req, res) => {
       receiverPostalCode,
       receiverStateCode,
       receiverPhone,
+      receiverEmail,
       declaredValue,
       currency = 'USD',
       weight,
@@ -508,9 +615,9 @@ router.post('/create-shipment', async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!receiverCountryCode || !receiverName || !receiverAddress || !receiverCity || !receiverPostalCode || !cartItems || !Array.isArray(cartItems)) {
+    if (!receiverCountryCode || !receiverName || !receiverAddress || !receiverCity || !receiverPostalCode || !receiverEmail || !cartItems || !Array.isArray(cartItems)) {
       return res.status(400).json({
-        error: 'Missing required fields: receiverCountryCode, receiverName, receiverAddress, receiverCity, receiverPostalCode, cartItems',
+        error: 'Missing required fields: receiverCountryCode, receiverName, receiverAddress, receiverCity, receiverPostalCode, receiverEmail, cartItems',
       });
     }
 
@@ -600,16 +707,30 @@ router.post('/create-shipment', async (req, res) => {
     const mobileNumber = mobileMatch ? mobileMatch[1].trim() : '';
     const billToPartyCompany = billToMatch ? billToMatch[1].trim() : '';
 
+    const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2); // Use totalLineValue as subtotal
+    const total = (parseFloat(subtotal) + parseFloat(freightCharge || 0)).toFixed(2);
+
     // Save to MongoDB
     const newDhlOrder = new DhlOrder({
-      awbNo,
+     awbNo,
       billToPartyCompany,
       mobileNumber,
       invoicePath,
       shipmentPdfPath,
       pdfData,
-      receiverName: receiverName || '',
-      receiverPhone: receiverPhone || '',
+      receiverName,
+      receiverPhone,
+      receiverEmail, // Store email
+      receiverAddress,
+      receiverCity,
+      receiverPostalCode,
+      receiverStateCode,
+      receiverCountryCode,
+      subtotal,
+      freightCharge: parseFloat(freightCharge || 0).toFixed(2),
+      total,
+      currency,
+      cartItems,
       status: 'Shipped',
     });
 
@@ -624,6 +745,20 @@ router.post('/create-shipment', async (req, res) => {
         product.soldStock = (product.soldStock || 0) + item.quantity;
         await product.save();
       }
+    }
+
+    try {
+      await sendOrderConfirmationEmail(newDhlOrder, cartItems, currency);
+    } catch (emailError) {
+      console.error('Email Sending Failed:', emailError.message, emailError.stack);
+      return res.status(200).json({
+        message: 'DHL order created successfully, but email sending failed',
+        awbNo,
+        invoicePath,
+        shipmentPdfPath,
+        emailStatus: 'failed',
+        emailError: emailError.message,
+      });
     }
 
     res.status(200).json({
